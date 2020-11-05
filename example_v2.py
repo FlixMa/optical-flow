@@ -13,10 +13,22 @@ def resize_to_fit(frame, size):
     factor = min(desired_width / actual_width, desired_height / actual_height)
     return cv.resize(frame, (0,0), fx=factor, fy=factor)
 
-parser = argparse.ArgumentParser(description='This sample demonstrates Lucas-Kanade Optical Flow calculation. \
-                                              The example file can be downloaded from: \
-                                              https://www.bogotobogo.com/python/OpenCV_Python/images/mean_shift_tracking/slow_traffic_small.mp4')
-parser.add_argument('image', type=str, help='path to image file')
+def smooth(vals, fps, freq_cutoff):
+    # take the points, mirror them and add them to the end to complete a loop
+    # which is necessary for the fourier transform to work.
+    vals_mirrored = np.array(list(vals) + list(reversed(list(vals)))[1:-1])
+    N = vals_mirrored.shape[0]
+    f = np.fft.fftfreq(N) * fps
+
+    vals_mirrored_fft = np.fft.fft(vals_mirrored)
+    vals_mirrored_fft[np.abs(f) > freq_cutoff] = 0
+    vals_mirrored_smoothed = np.real(np.fft.ifft(vals_mirrored_fft))
+    return vals_mirrored_smoothed[:vals.shape[0]]
+
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument('video', type=str, help='path to video file')
 parser.add_argument('--analysis', type=str, help='path to analysis file')
 args = parser.parse_args()
 
@@ -89,20 +101,6 @@ if not os.path.exists(args.analysis):
 
     with open(args.analysis, 'wb') as file:
         pickle.dump(np.array(frame_transforms), file)
-
-
-def smooth(vals, fps, freq_cutoff):
-    # take the points, mirror them and add them to the end to complete a loop
-    # which is necessary for the fourier transform to work.
-    vals_mirrored = np.array(list(vals) + list(reversed(list(vals)))[1:-1])
-    N = vals_mirrored.shape[0]
-    f = np.fft.fftfreq(N) * fps
-
-    vals_mirrored_fft = np.fft.fft(vals_mirrored)
-    vals_mirrored_fft[np.abs(f) > freq_cutoff] = 0
-    vals_mirrored_smoothed = np.real(np.fft.ifft(vals_mirrored_fft))
-    return vals_mirrored_smoothed[:vals.shape[0]]
-
 
 with open(args.analysis, 'rb') as file:
     frame_transforms = pickle.load(file)
@@ -229,98 +227,3 @@ with open(args.analysis, 'rb') as file:
 
     cv.destroyAllWindows()
     print('\ndone')
-
-
-    '''
-    txs_diff = frame_transforms_smoothed[:, 0, 2] - frame_transforms[:, 0, 2]
-    tys_diff = frame_transforms_smoothed[:, 1, 2] - frame_transforms[:, 1, 2]
-
-    tx_min_diff = math.floor(np.min(txs_diff))
-    ty_min_diff = math.floor(np.min(tys_diff))
-    tx_max_diff = math.ceil(np.max(txs_diff))
-    ty_max_diff = math.ceil(np.max(tys_diff))
-
-
-    fig, ax = plt.subplots(figsize=(10,10))
-    ax.plot(txs, label='txs')
-    ax.plot(tys, label='tys')
-    ax.plot(txs_smoothed, label='txs_smoothed')
-    ax.plot(tys_smoothed, label='tys_smoothed')
-    ax.legend()
-    plt.show()
-
-    skipped = False
-
-    # Read first frame to get an idea about frame size
-    # and reset stream back to the start
-    cap = cv.VideoCapture(args.image)
-    ret, first_frame = cap.read()
-    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-
-    original_resized = resize_to_fit(first_frame, (1000, 1000))
-
-    # calculate output frame sizes
-    frame_height, frame_width = first_frame.shape[:2]
-    landscape = frame_width > frame_height
-    stabilized_width = frame_width - abs(tx_min_diff) - abs(tx_max_diff)
-    stabilized_height = frame_height - abs(ty_min_diff) - abs(ty_max_diff)
-    stabilized_size = (stabilized_width, stabilized_height)
-    print('stabilized_size:', stabilized_size)
-
-    stabilized_filepath = os.path.splitext(args.image)[0] + '_stabilized.mp4'
-    comparison_filepath = os.path.splitext(args.image)[0] + '_comparison.mp4'
-    fourcc = cv.VideoWriter_fourcc('H','2','6','4')
-    stabilized_writer = None
-    comparison_writer = None
-
-
-    cv.namedWindow('comparison')
-    cv.moveWindow('comparison', 30, 30)
-    for tx_diff, ty_diff in zip(txs_diff, tys_diff):
-        ret, frame = cap.read()
-        if not ret:
-            raise ValueError('No more frames to read. The video source might have changed.')
-        print('.', end='')
-        sys.stdout.flush()
-
-        top    = abs(ty_min_diff) + int(ty_diff)
-        bottom = frame_height - abs(ty_max_diff) + int(ty_diff)
-        left   = abs(tx_min_diff) + int(tx_diff)
-        right  = frame_width - abs(tx_max_diff) + int(tx_diff)
-        stabilized = frame[top:bottom, left:right].copy()
-
-        frame = cv.rectangle(frame, (left, top), (right, bottom), (255, 0, 255), 4)
-
-        stabilized_resized  = resize_to_fit(stabilized, (1000, 1000))
-        original_resized    = resize_to_fit(frame, (1000, 1000))
-        comparison = np.vstack((original_resized, stabilized_resized)) if landscape else np.hstack((original_resized, stabilized_resized))
-
-        if stabilized_writer is None:
-            stabilized_writer = cv.VideoWriter(
-                stabilized_filepath,
-                fourcc,
-                fps,
-                tuple(reversed(list(stabilized.shape[:2]))),
-                True
-            )
-        stabilized_writer.write(stabilized)
-        if comparison_writer is None:
-            comparison_writer = cv.VideoWriter(
-                comparison_filepath,
-                fourcc,
-                fps,
-                tuple(reversed(list(comparison.shape[:2]))),
-                True
-            )
-        comparison_writer.write(comparison)
-
-
-        if not skipped:
-            cv.imshow('comparison', comparison)
-            k = cv.waitKey(30) & 0xff
-            if k == 27:
-                skipped = True
-
-    cv.destroyAllWindows()
-    print('\ndone')
-    '''
