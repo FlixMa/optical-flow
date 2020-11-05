@@ -33,13 +33,13 @@ parser.add_argument('--analysis', type=str, help='path to analysis file')
 args = parser.parse_args()
 
 if args.analysis is None:
-    args.analysis = os.path.splitext(args.image)[0] + '.analysis'
+    args.analysis = os.path.splitext(args.video)[0] + '.analysis'
 
 if not os.path.exists(args.analysis):
     # params for ShiTomasi corner detection
     feature_params = dict( maxCorners = 100,
                            qualityLevel = 0.3,
-                           minDistance = 107,
+                           minDistance = 17,
                            blockSize = 7 )
     # Parameters for lucas kanade optical flow
     lk_params = dict( winSize  = (15,15),
@@ -49,7 +49,7 @@ if not os.path.exists(args.analysis):
     color = np.random.randint(0,255,(100,3))
     # Take first frame and find corners in it
 
-    cap = cv.VideoCapture(args.image)
+    cap = cv.VideoCapture(args.video)
     ret, old_frame = cap.read()
     frame_height, frame_width = tuple(old_frame.shape[:2])
     old_gray = cv.cvtColor(old_frame, cv.COLOR_BGR2GRAY)
@@ -57,16 +57,14 @@ if not os.path.exists(args.analysis):
 
     frame_transforms = []
 
-    # Create a mask image for drawing purposes
-
     skipped = False
     while(1):
         ret, frame = cap.read()
         if not ret:
             break
 
-        frame_gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
         # calculate optical flow
+        frame_gray = cv.cvtColor(frame, cv.COLOR_BGR2GRAY)
         p1, st, err = cv.calcOpticalFlowPyrLK(old_gray, frame_gray, p0, None, **lk_params)
 
         # Select good points
@@ -78,7 +76,6 @@ if not os.path.exists(args.analysis):
             break
 
         transform, inliers = cv.estimateAffinePartial2D(p0, p1)
-
         frame_transforms.append(transform)
 
         # Now update the previous frame and previous points
@@ -94,7 +91,7 @@ if not os.path.exists(args.analysis):
 
         # show the image
         if not skipped:
-            cv.imshow('frame', resize_to_fit(img, (1000,1000)))
+            cv.imshow('frame', resize_to_fit(frame, (1000,1000)))
             k = cv.waitKey(1) & 0xff
             if k == 27:
                 skipped = True
@@ -104,6 +101,7 @@ if not os.path.exists(args.analysis):
 
 with open(args.analysis, 'rb') as file:
     frame_transforms = pickle.load(file)
+    print('unpickled:', type(frame_transforms))
     print('frame_transforms:', frame_transforms.shape)
 
     num_analyzed_frames = len(frame_transforms)
@@ -169,15 +167,15 @@ with open(args.analysis, 'rb') as file:
     frame_transforms_smoothed[:, 0, 2] = tx_smoothed # tx
     frame_transforms_smoothed[:, 1, 2] = ty_smoothed # ty
 
-    stabilized_filepath = os.path.splitext(args.image)[0] + '_stabilized.mp4'
-    comparison_filepath = os.path.splitext(args.image)[0] + '_comparison.mp4'
+    stabilized_filepath = os.path.splitext(args.video)[0] + '_stabilized.mp4'
+    comparison_filepath = os.path.splitext(args.video)[0] + '_comparison.mp4'
     fourcc = cv.VideoWriter_fourcc('H','2','6','4')
     stabilized_writer = None
     comparison_writer = None
 
     # Read first frame to get an idea about frame size
     # and reset stream back to the start
-    cap = cv.VideoCapture(args.image)
+    cap = cv.VideoCapture(args.video)
     ret, first_frame = cap.read()
     frame_height, frame_width = first_frame.shape[:2]
     frame_size = frame_width, frame_height
@@ -222,8 +220,10 @@ with open(args.analysis, 'rb') as file:
             cv.imshow('comparison', comparison)
             k = cv.waitKey(30) & 0xff
             if k == 27:
-                break
                 skipped = True
+        else:
+            print('.', end='')
+            sys.stdout.flush()
 
     cv.destroyAllWindows()
     print('\ndone')
