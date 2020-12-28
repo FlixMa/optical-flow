@@ -6,7 +6,8 @@ import pickle
 import matplotlib.pyplot as plt
 import os
 import sys
-from scipy.optimize import LinearConstraint, minimize
+#from scipy.optimize import LinearConstraint, minimize
+from scipy.interpolate import UnivariateSpline
 
 def resize_to_fit(frame, size):
     desired_width, desired_height = size
@@ -26,7 +27,14 @@ def smooth(vals, fps, freq_cutoff):
     vals_mirrored_smoothed = np.real(np.fft.ifft(vals_mirrored_fft))
     return vals_mirrored_smoothed[:vals.shape[0]]
 
-
+def spline(vals, factor=None):
+    v_min = np.min(vals)
+    v_max = np.max(vals)
+    v_norm = (vals - v_min) / (v_max - v_min)
+    ts = np.arange(len(vals))
+    spl = UnivariateSpline(ts, v_norm, s=factor)
+    v_norm_smoothed = spl(ts)
+    return v_norm_smoothed * (v_max - v_min) + v_min
 
 parser = argparse.ArgumentParser()
 parser.add_argument('video', type=str, help='path to video file')
@@ -141,25 +149,52 @@ with open(args.analysis, 'rb') as file:
     d_theta_smoothed = d_theta + theta_diff
     d_s_smoothed = d_s + s_diff
 
+    # splined trajectory
+    px_splined = spline(px, 0.7)
+    py_splined = spline(py, 0.7)
+    theta_splined = spline(theta, 0.7)
+    s_splined = spline(s, 0.7)
+
+    # calculate difference from real transform and the desired smoothed trajectory
+    tx_splined = tx + px_splined - px
+    ty_splined = ty + py_splined - py
+    d_theta_splined = d_theta + theta_splined - theta
+    d_s_splined = d_s + s_splined - s
+
 
     fig, (ax1, ax2, ax3, ax4) = plt.subplots(nrows=4, figsize=(10,10))
     ax1.plot(px, label='px')
     ax1.plot(px_smoothed, label='px_smoothed')
+    ax1.plot(px_splined, label='px_splined')
     ax1.legend()
 
     ax2.plot(py, label='py')
     ax2.plot(py_smoothed, label='py_smoothed')
+    ax2.plot(py_splined, label='py_splined')
     ax2.legend()
 
     ax3.plot(theta, label='theta')
     ax3.plot(theta_smoothed, label='theta_smoothed')
+    ax3.plot(theta_splined, label='theta_splined')
     ax3.legend()
 
     ax4.plot(s, label='s')
     ax4.plot(s_smoothed, label='s_smoothed')
+    ax4.plot(s_splined, label='s_splined')
     ax4.legend()
     plt.show()
 
+    #sys.exit()
+    s_splined = 1 # otherwise the video will be zooming in / out like crazy :-(
+    frame_transforms_smoothed = np.zeros(frame_transforms.shape)
+    frame_transforms_smoothed[:, 0, 0] = s_splined *  np.cos(d_theta_splined) # s *  cos
+    frame_transforms_smoothed[:, 1, 0] = s_splined *  np.sin(d_theta_splined) # s *  sin
+    frame_transforms_smoothed[:, 0, 1] = s_splined * -np.sin(d_theta_splined) # s * -sin
+    frame_transforms_smoothed[:, 1, 1] = s_splined *  np.cos(d_theta_splined) # s *  cos
+    frame_transforms_smoothed[:, 0, 2] = tx_splined # tx
+    frame_transforms_smoothed[:, 1, 2] = ty_splined # ty
+
+    '''# using fourier transform
     frame_transforms_smoothed = np.zeros(frame_transforms.shape)
     frame_transforms_smoothed[:, 0, 0] =  np.cos(d_theta_smoothed) # s * cos
     frame_transforms_smoothed[:, 1, 0] =  np.sin(d_theta_smoothed) # s * sin
@@ -167,7 +202,7 @@ with open(args.analysis, 'rb') as file:
     frame_transforms_smoothed[:, 1, 1] = np.cos(d_theta_smoothed)  # s * cos
     frame_transforms_smoothed[:, 0, 2] = tx_smoothed # tx
     frame_transforms_smoothed[:, 1, 2] = ty_smoothed # ty
-
+    '''
     stabilized_filepath = os.path.splitext(args.video)[0] + '_stabilized.mp4'
     comparison_filepath = os.path.splitext(args.video)[0] + '_comparison.mp4'
     fourcc = cv.VideoWriter_fourcc('H','2','6','4')
